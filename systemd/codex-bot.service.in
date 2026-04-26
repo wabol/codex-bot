@@ -1,0 +1,19 @@
+[Unit]
+Description=Codex Slack Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__NODE_BIN__ __PROJECT_DIR__/src/main.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=CODEX_BOT_WORKDIR=__HOME_DIR__
+Environment=CODEX_BIN=__CODEX_BIN__
+Environment=PATH=__CODEX_BIN_DIR__:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
