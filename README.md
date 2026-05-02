@@ -58,13 +58,33 @@ SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 ```
 
-For personal use, set an allowlist:
+Set a trusted Slack user allowlist:
 
 ```bash
 CODEX_BOT_ALLOWED_USERS=U1234567890
 ```
 
+The bot rejects all human users if `CODEX_BOT_ALLOWED_USERS` is empty. For an intentionally open personal workspace, set:
+
+```bash
+CODEX_BOT_ALLOW_ALL_USERS=true
+```
+
 Leave `CODEX_BOT_WORKDIR` empty to run Codex from your home directory.
+
+Channel messages are handled when they mention the bot. `codex:` prefix messages are enabled by default and can be disabled with:
+
+```bash
+CODEX_BOT_ENABLE_CHANNEL_PREFIX=false
+```
+
+Inactive Slack thread sessions are pruned after 180 days by default:
+
+```bash
+CODEX_BOT_SESSION_RETENTION_DAYS=180
+```
+
+Set it to `0` to keep session mappings indefinitely.
 
 ## Run
 

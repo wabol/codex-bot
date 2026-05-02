@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, validateConfig } from "./config.js";
 import { CodexAppServerRunner } from "./app-server-runner.js";
+import { commandName, isAuthorized, shouldHandle } from "./message-policy.js";
 import { slackSessionKey } from "./session-key.js";
 import { SlackClient, stripBotMention } from "./slack.js";
 
@@ -27,47 +28,13 @@ const runner = new CodexAppServerRunner(config, async (target, text) => {
 
 let botUserId = "";
 let socket = null;
+let reconnectTimer = null;
+let reconnectDelayMs = 5000;
+let shuttingDown = false;
 
 function log(message, extra = "") {
   const suffix = extra ? ` ${extra}` : "";
   console.log(`${new Date().toISOString()} ${message}${suffix}`);
-}
-
-function isAuthorized(event) {
-  if (event.bot_id || event.subtype === "bot_message") return false;
-  if (config.allowedUsers.size > 0 && !config.allowedUsers.has(event.user)) return false;
-  if (event.channel_type === "im") return true;
-  if (config.allowedUsers.size > 0 && config.allowedChannels.size === 0) return true;
-  return config.allowedChannels.has(event.channel);
-}
-
-function shouldHandle(event) {
-  const text = String(event.text || "");
-  if (event.channel_type === "im") return true;
-  if (text.includes(`<@${botUserId}>`)) return true;
-  if (!config.requireMention && config.allowedChannels.has(event.channel)) return true;
-  return /^codex[:,]\s+/i.test(text);
-}
-
-function commandName(text) {
-  const trimmed = text.trim();
-  const first = trimmed.split(/\s+/, 1)[0].toLowerCase();
-  if (first.startsWith("/")) return first;
-  if ([
-    "help",
-    "status",
-    "where",
-    "id",
-    "cancel",
-    "interrupt",
-    "stop",
-    "restart",
-    "reset",
-    "screen",
-    "approve",
-    "deny"
-  ].includes(first)) return `/${first}`;
-  return "";
 }
 
 async function handleCommand(event, text) {
@@ -210,7 +177,7 @@ async function updateWorkReaction(target, state) {
 
 async function handleMessage(event) {
   log("message event", `type=${event.type} channel=${event.channel} user=${event.user} channel_type=${event.channel_type || ""}`);
-  if (!isAuthorized(event) || !shouldHandle(event)) return;
+  if (!isAuthorized(event, config) || !shouldHandle(event, botUserId, config)) return;
   const rawText = stripBotMention(event.text, botUserId).replace(/^codex[:,]\s+/i, "").trim();
   if (!rawText) return;
   if (await handleCommand(event, rawText)) return;
@@ -234,7 +201,10 @@ async function handleEnvelope(envelope) {
 
 function connectSocket(url) {
   socket = new WebSocket(url);
-  socket.addEventListener("open", () => log("slack socket connected"));
+  socket.addEventListener("open", () => {
+    reconnectDelayMs = 5000;
+    log("slack socket connected");
+  });
   socket.addEventListener("message", async (message) => {
     let envelope;
     try {
@@ -254,7 +224,7 @@ function connectSocket(url) {
   });
   socket.addEventListener("close", async (event) => {
     log("slack socket closed", `code=${event.code}`);
-    setTimeout(start, 5000).unref();
+    scheduleReconnect();
   });
   socket.addEventListener("error", (event) => {
     log("slack socket error", event.message || "");
@@ -269,8 +239,27 @@ async function start() {
   connectSocket(url);
 }
 
+function scheduleReconnect() {
+  if (shuttingDown || reconnectTimer) return;
+  const delay = reconnectDelayMs;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (shuttingDown) return;
+    try {
+      await start();
+    } catch (error) {
+      log("slack reconnect failed", error.stack || String(error));
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 60000);
+      scheduleReconnect();
+    }
+  }, delay);
+  reconnectTimer.unref?.();
+}
+
 async function shutdown(signal) {
+  shuttingDown = true;
   log("shutdown requested", signal);
+  if (reconnectTimer) clearTimeout(reconnectTimer);
   releaseSingleInstance(lockFile);
   await runner.stop();
   socket?.close();

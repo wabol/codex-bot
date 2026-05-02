@@ -40,6 +40,7 @@ logs/appserver/session.json
 ```
 
 The format is versioned. A legacy single-thread `threadId` state is migrated lazily into the first new Slack session.
+Inactive session mappings are pruned according to `CODEX_BOT_SESSION_RETENTION_DAYS`, which defaults to 180 days. Active turns and pending approvals must not be pruned.
 
 ## Slack Behavior
 

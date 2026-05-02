@@ -21,6 +21,7 @@ export class CodexAppServerRunner {
     this.logPath = "";
     this.ready = null;
     this.restoreState();
+    if (this.pruneInactiveSessions() > 0) this.saveState();
   }
 
   status(target) {
@@ -30,7 +31,7 @@ export class CodexAppServerRunner {
       : "app-server stopped";
     if (!session) return `${processState}, sessions ${this.sessions.size}`;
     const active = session.activeTurnId ? `, active turn ${session.activeTurnId}` : "";
-    const approval = session.pendingApproval ? ", approval pending" : "";
+    const approval = session.pendingApprovals.length ? `, approvals pending ${session.pendingApprovals.length}` : "";
     return `${processState}, session ${session.key}, thread ${session.threadId || "none"}${active}${approval}`;
   }
 
@@ -43,80 +44,92 @@ export class CodexAppServerRunner {
     const session = this.getSession(target);
     return this.withSessionQueue(session, async () => {
       await this.notifyLifecycle(session, "working");
-      if (this.config.dryRun) {
-        await this.emit(session, `DRY RUN app-server input:\n${text}`);
-        await this.notifyLifecycle(session, "completed");
-        return;
-      }
-      await this.ensureReady();
-      await this.ensureThread(session);
+      try {
+        if (this.config.dryRun) {
+          await this.emit(session, `DRY RUN app-server input:\n${text}`);
+          await this.notifyLifecycle(session, "completed");
+          return;
+        }
+        await this.ensureReady();
+        await this.ensureThread(session);
 
-      const input = [{ type: "text", text: String(text || ""), text_elements: [] }];
-      if (session.activeTurnId) {
-        await this.request("turn/steer", {
+        const input = [{ type: "text", text: String(text || ""), text_elements: [] }];
+        if (session.activeTurnId) {
+          await this.request("turn/steer", {
+            threadId: session.threadId,
+            expectedTurnId: session.activeTurnId,
+            input
+          });
+          await this.emit(session, "Steered the active Codex turn.");
+          return;
+        }
+
+        const response = await this.request("turn/start", {
           threadId: session.threadId,
-          expectedTurnId: session.activeTurnId,
-          input
-        });
-        await this.emit(session, "Steered the active Codex turn.");
-        return;
+          input,
+          approvalPolicy: "on-request",
+          approvalsReviewer: "user"
+        }, session);
+        const turnId = response?.turn?.id || "";
+        if (turnId) {
+          session.activeTurnId = turnId;
+          this.turnToSession.set(turnId, session.key);
+        }
+        this.saveState();
+      } catch (error) {
+        await this.notifyLifecycle(session, "failed");
+        throw error;
       }
-
-      const response = await this.request("turn/start", {
-        threadId: session.threadId,
-        input,
-        approvalPolicy: "on-request",
-        approvalsReviewer: "user"
-      }, session);
-      const turnId = response?.turn?.id || "";
-      if (turnId) {
-        session.activeTurnId = turnId;
-        this.turnToSession.set(turnId, session.key);
-      }
-      this.saveState();
     });
   }
 
   async approve(target) {
     const session = this.getSession(target);
-    if (this.config.dryRun) {
-      await this.emit(session, "DRY RUN approval.");
-      return;
-    }
-    await this.ensureReady();
-    if (!session.pendingApproval) {
+    if (session.pendingApprovals.length === 0) {
       await this.emit(session, "No approval request is pending in this Slack session.");
       return;
     }
-    const approval = session.pendingApproval;
-    session.pendingApproval = null;
-    this.sendResponse(approval.id, approvalResponse(approval));
+    const approvals = session.pendingApprovals.splice(0);
     this.saveState();
-    await this.emit(session, "Approval sent.");
+    if (this.config.dryRun) {
+      await this.emit(session, `DRY RUN approval for ${approvals.length} request${approvals.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    await this.ensureReady();
+    for (const approval of approvals) {
+      this.sendResponse(approval.id, approvalResponse(approval));
+    }
+    await this.emit(session, approvals.length === 1 ? "Approval sent." : `Approved ${approvals.length} requests.`);
   }
 
   async deny(target) {
     const session = this.getSession(target);
-    if (this.config.dryRun) {
-      await this.emit(session, "DRY RUN denial.");
-      return;
-    }
-    await this.ensureReady();
-    if (!session.pendingApproval) {
+    if (session.pendingApprovals.length === 0) {
       await this.emit(session, "No approval request is pending in this Slack session.");
       return;
     }
-    const approval = session.pendingApproval;
-    session.pendingApproval = null;
-    this.sendResponse(approval.id, denialResponse(approval));
+    const approvals = session.pendingApprovals.splice(0);
     this.saveState();
-    await this.emit(session, "Denial sent.");
+    if (this.config.dryRun) {
+      await this.emit(session, `DRY RUN denial for ${approvals.length} request${approvals.length === 1 ? "" : "s"}.`);
+      return;
+    }
+    await this.ensureReady();
+    for (const approval of approvals) {
+      this.sendResponse(approval.id, denialResponse(approval));
+    }
+    await this.emit(session, approvals.length === 1 ? "Denial sent." : `Denied ${approvals.length} requests.`);
   }
 
   async interrupt(target) {
     const session = this.getSession(target);
-    await this.ensureReady();
     if (!session.threadId || !session.activeTurnId) return false;
+    if (this.config.dryRun) {
+      session.activeTurnId = "";
+      this.saveState();
+      return true;
+    }
+    await this.ensureReady();
     await this.request("turn/interrupt", {
       threadId: session.threadId,
       turnId: session.activeTurnId
@@ -129,7 +142,7 @@ export class CodexAppServerRunner {
     session.threadId = "";
     session.threadReady = false;
     session.activeTurnId = "";
-    session.pendingApproval = null;
+    session.pendingApprovals = [];
     session.agentTextByTurn.clear();
     session.commandOutputByTurn.clear();
     session.recentTranscript = [];
@@ -202,7 +215,7 @@ export class CodexAppServerRunner {
       for (const session of this.sessions.values()) {
         session.threadReady = false;
         session.activeTurnId = "";
-        session.pendingApproval = null;
+        session.pendingApprovals = [];
       }
       this.turnToSession.clear();
       this.emitAll(`Codex app-server exited with code ${code}${signal ? ` signal ${signal}` : ""}.`);
@@ -336,6 +349,7 @@ export class CodexAppServerRunner {
 
     const params = message.params || {};
     const session = this.findSession(params);
+    if (session) this.touchSession(session);
     switch (message.method) {
       case "thread/started":
         if (session && params.thread?.id) {
@@ -409,13 +423,13 @@ export class CodexAppServerRunner {
   }
 
   async handleApprovalRequest(session, message) {
-    session.pendingApproval = {
+    session.pendingApprovals.push({
       id: message.id,
       method: message.method,
       params: message.params || {}
-    };
+    });
     this.saveState();
-    await this.emit(session, formatApproval(session.pendingApproval));
+    await this.emit(session, formatApproval(session.pendingApprovals.at(-1), session.pendingApprovals.length));
   }
 
   async handleTurnCompleted(session, params) {
@@ -483,6 +497,7 @@ export class CodexAppServerRunner {
       this.sessions.set(key, session);
     }
     if (target) session.target = target;
+    this.touchSession(session);
     if (session.threadId) this.threadToSession.set(session.threadId, session.key);
     this.saveState();
     return session;
@@ -513,7 +528,7 @@ export class CodexAppServerRunner {
       return;
     }
     for (const [key, value] of Object.entries(state.sessions || {})) {
-      const session = createSession(key, value.target || null);
+      const session = createSession(key, value.target || null, parseTimestamp(value.updatedAt || state.updatedAt));
       session.threadId = value.threadId || "";
       this.sessions.set(key, session);
       if (session.threadId) this.threadToSession.set(session.threadId, key);
@@ -521,6 +536,7 @@ export class CodexAppServerRunner {
   }
 
   saveState() {
+    this.pruneInactiveSessions();
     fs.mkdirSync(path.dirname(this.stateFile), { recursive: true, mode: 0o700 });
     const sessions = {};
     for (const [key, session] of this.sessions) {
@@ -532,7 +548,7 @@ export class CodexAppServerRunner {
           messageTs: session.target.messageTs,
           sessionKey: session.target.sessionKey
         } : null,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date(session.updatedAt).toISOString()
       };
     }
     fs.writeFileSync(this.stateFile, JSON.stringify({
@@ -541,6 +557,30 @@ export class CodexAppServerRunner {
       workdir: this.config.workdir,
       sessions
     }, null, 2) + "\n", { mode: 0o600 });
+  }
+
+  touchSession(session) {
+    session.updatedAt = Date.now();
+  }
+
+  pruneInactiveSessions() {
+    const days = Number(this.config.sessionRetentionDays ?? 180);
+    if (!Number.isFinite(days) || days <= 0) return 0;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    let pruned = 0;
+    for (const [key, session] of this.sessions) {
+      if (session.activeTurnId || session.pendingApprovals.length) continue;
+      if (Number(session.updatedAt) >= cutoff) continue;
+      this.sessions.delete(key);
+      for (const [threadId, sessionKey] of this.threadToSession) {
+        if (sessionKey === key) this.threadToSession.delete(threadId);
+      }
+      for (const [turnId, sessionKey] of this.turnToSession) {
+        if (sessionKey === key) this.turnToSession.delete(turnId);
+      }
+      pruned++;
+    }
+    return pruned;
   }
 
   logRaw(entry) {
@@ -561,26 +601,33 @@ export class CodexAppServerRunner {
   }
 }
 
-function createSession(key, target) {
+function createSession(key, target, updatedAt = Date.now()) {
   return {
     key,
     target,
     threadId: "",
     threadReady: false,
     activeTurnId: "",
-    pendingApproval: null,
+    pendingApprovals: [],
     agentTextByTurn: new Map(),
     commandOutputByTurn: new Map(),
     recentTranscript: [],
+    updatedAt,
     queue: Promise.resolve()
   };
 }
 
-function formatApproval(approval) {
+function parseTimestamp(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : Date.now();
+}
+
+function formatApproval(approval, pendingCount = 1) {
   const params = approval.params;
+  const pending = pendingCount > 1 ? ` (${pendingCount} pending)` : "";
   if (approval.method === "item/commandExecution/requestApproval") {
     return [
-      "Approval requested: command execution",
+      `Approval requested: command execution${pending}`,
       params.reason ? `Reason: ${params.reason}` : "",
       params.cwd ? `cwd: ${params.cwd}` : "",
       params.command ? `command: ${params.command}` : "",
@@ -590,7 +637,7 @@ function formatApproval(approval) {
   }
   if (approval.method === "item/fileChange/requestApproval") {
     return [
-      "Approval requested: file change",
+      `Approval requested: file change${pending}`,
       params.reason ? `Reason: ${params.reason}` : "",
       params.grantRoot ? `root: ${params.grantRoot}` : "",
       "",
@@ -599,14 +646,14 @@ function formatApproval(approval) {
   }
   if (approval.method === "item/permissions/requestApproval") {
     return [
-      "Approval requested: additional permissions",
+      `Approval requested: additional permissions${pending}`,
       params.reason ? `Reason: ${params.reason}` : "",
       params.cwd ? `cwd: ${params.cwd}` : "",
       "",
       "Reply `approve` or `deny` in this Slack session."
     ].filter(Boolean).join("\n");
   }
-  return "Approval requested. Reply `approve` or `deny` in this Slack session.";
+  return `Approval requested${pending}. Reply \`approve\` or \`deny\` in this Slack session.`;
 }
 
 function approvalResponse(approval) {

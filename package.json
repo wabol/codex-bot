@@ -6,7 +6,7 @@
   "description": "Minimal Slack-to-local-Codex bridge",
   "scripts": {
     "start": "node src/main.js",
-    "check": "node --check src/main.js && node --check src/config.js && node --check src/slack.js && node --check src/session-key.js && node --check src/app-server-runner.js && node --check scripts/validate-slack.js",
+    "check": "node --check src/main.js && node --check src/config.js && node --check src/slack.js && node --check src/session-key.js && node --check src/message-policy.js && node --check src/app-server-runner.js && node --check scripts/validate-slack.js",
     "test": "node --test",
     "validate:slack": "node scripts/validate-slack.js"
   },

@@ -41,6 +41,11 @@ function intEnv(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function nonNegativeIntEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export function loadConfig() {
   const home = os.homedir();
   const projectDir = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -60,7 +65,9 @@ export function loadConfig() {
     slackAppToken: process.env.SLACK_APP_TOKEN || "",
     allowedChannels: new Set(allowedChannels),
     allowedUsers: new Set(allowedUsers),
+    allowAllUsers: boolEnv("CODEX_BOT_ALLOW_ALL_USERS", false),
     requireMention: boolEnv("CODEX_BOT_REQUIRE_MENTION", true),
+    enableChannelPrefix: boolEnv("CODEX_BOT_ENABLE_CHANNEL_PREFIX", true),
     workingReaction: process.env.CODEX_BOT_WORKING_REACTION || "eyes",
     activeReaction: process.env.CODEX_BOT_ACTIVE_REACTION || "hourglass_flowing_sand",
     doneReaction: process.env.CODEX_BOT_DONE_REACTION || "white_check_mark",
@@ -73,6 +80,7 @@ export function loadConfig() {
     timeoutMs: intEnv("CODEX_BOT_TIMEOUT_MS", 30 * 60 * 1000),
     maxSlackChars: intEnv("CODEX_BOT_MAX_SLACK_CHARS", 3500),
     logRetentionDays: intEnv("CODEX_BOT_LOG_RETENTION_DAYS", 30),
+    sessionRetentionDays: nonNegativeIntEnv("CODEX_BOT_SESSION_RETENTION_DAYS", 180),
     logDir: process.env.CODEX_BOT_LOG_DIR || path.join(projectDir, "logs")
   };
 }
