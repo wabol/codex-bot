@@ -86,6 +86,12 @@ CODEX_BOT_SESSION_RETENTION_DAYS=180
 
 Set it to `0` to keep session mappings indefinitely.
 
+Slack API calls time out after 15 seconds by default so a slow reaction or post cannot block Codex indefinitely:
+
+```bash
+CODEX_BOT_SLACK_API_TIMEOUT_MS=15000
+```
+
 ## Run
 
 ```bash

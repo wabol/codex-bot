@@ -16,7 +16,6 @@ export class CodexAppServerRunner {
     this.legacyThreadId = "";
     this.startedAt = 0;
     this.stdoutBuffer = "";
-    this.outputQueue = Promise.resolve();
     this.stateFile = path.join(config.logDir, "appserver", "session.json");
     this.logPath = "";
     this.ready = null;
@@ -43,7 +42,7 @@ export class CodexAppServerRunner {
   async send(text, target) {
     const session = this.getSession(target);
     return this.withSessionQueue(session, async () => {
-      await this.notifyLifecycle(session, "working");
+      this.notifyLifecycle(session, "working");
       try {
         if (this.config.dryRun) {
           await this.emit(session, `DRY RUN app-server input:\n${text}`);
@@ -458,12 +457,12 @@ export class CodexAppServerRunner {
     if (!session?.target || !this.outputSink) return;
     const payload = normalizeSlackText(text);
     if (!payload) return;
-    this.outputQueue = this.outputQueue
+    session.outputQueue = session.outputQueue
       .then(() => this.outputSink(session.target, payload))
       .catch((error) => {
         console.error(`${new Date().toISOString()} output sink failed`, error.stack || String(error));
       });
-    await this.outputQueue;
+    await session.outputQueue;
   }
 
   async emitAll(text) {
@@ -613,7 +612,8 @@ function createSession(key, target, updatedAt = Date.now()) {
     commandOutputByTurn: new Map(),
     recentTranscript: [],
     updatedAt,
-    queue: Promise.resolve()
+    queue: Promise.resolve(),
+    outputQueue: Promise.resolve()
   };
 }
 

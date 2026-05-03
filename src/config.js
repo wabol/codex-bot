@@ -78,6 +78,7 @@ export function loadConfig() {
     codexDisableFeatures: splitList(process.env.CODEX_BOT_DISABLE_FEATURES || "apps,plugins"),
     dryRun: boolEnv("CODEX_BOT_DRY_RUN", false),
     timeoutMs: intEnv("CODEX_BOT_TIMEOUT_MS", 30 * 60 * 1000),
+    slackApiTimeoutMs: intEnv("CODEX_BOT_SLACK_API_TIMEOUT_MS", 15 * 1000),
     maxSlackChars: intEnv("CODEX_BOT_MAX_SLACK_CHARS", 3500),
     logRetentionDays: intEnv("CODEX_BOT_LOG_RETENTION_DAYS", 30),
     sessionRetentionDays: nonNegativeIntEnv("CODEX_BOT_SESSION_RETENTION_DAYS", 180),

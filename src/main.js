@@ -13,7 +13,8 @@ const lockFile = acquireSingleInstance(config);
 
 const slack = new SlackClient({
   botToken: config.slackBotToken,
-  appToken: config.slackAppToken
+  appToken: config.slackAppToken,
+  timeoutMs: config.slackApiTimeoutMs
 });
 const runner = new CodexAppServerRunner(config, async (target, text) => {
   await slack.postChunks({
@@ -183,7 +184,7 @@ async function handleMessage(event) {
   if (await handleCommand(event, rawText)) return;
 
   try {
-    await acknowledgeWork(event);
+    acknowledgeWork(event);
     await runner.send(rawText, eventTarget(event));
   } catch (error) {
     await reply(event, `Codex failed:\n${error.message || error}`);

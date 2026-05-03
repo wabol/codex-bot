@@ -179,6 +179,29 @@ test("send failure reports failed lifecycle", async () => {
   ]);
 });
 
+test("outputs are queued per session instead of globally", async () => {
+  let releaseA;
+  const sent = [];
+  const runner = new CodexAppServerRunner(config(), async (outTarget, text) => {
+    sent.push(`${outTarget.sessionKey}:${text}`);
+    if (outTarget.sessionKey === "a") {
+      await new Promise((resolve) => {
+        releaseA = resolve;
+      });
+    }
+  });
+  const a = runner.getSession(target("a"));
+  const b = runner.getSession(target("b"));
+
+  const emitA = runner.emit(a, "slow");
+  await new Promise((resolve) => setImmediate(resolve));
+  await runner.emit(b, "fast");
+
+  assert.deepEqual(sent, ["a:slow", "b:fast"]);
+  releaseA();
+  await emitA;
+});
+
 test("approve deny and interrupt do not start app-server when there is no pending work", async () => {
   const outputs = [];
   const runner = new CodexAppServerRunner(liveConfig(), async (outTarget, text) => {

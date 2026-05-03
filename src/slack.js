@@ -1,50 +1,53 @@
 export class SlackClient {
-  constructor({ botToken, appToken }) {
+  constructor({ botToken, appToken, timeoutMs = 15_000 }) {
     this.botToken = botToken;
     this.appToken = appToken;
+    this.timeoutMs = timeoutMs;
   }
 
   async api(method, payload = {}) {
+    return this.callApi({ method, payload, token: this.botToken, label: "Slack API" });
+  }
+
+  async appApi(method, payload = {}) {
+    return this.callApi({ method, payload, token: this.appToken, label: "Slack app API" });
+  }
+
+  async callApi({ method, payload, token, label }) {
     const body = new URLSearchParams();
     for (const [key, value] of Object.entries(payload)) {
       if (value != null) body.set(key, String(value));
     }
-    const response = await fetch(`https://slack.com/api/${method}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.botToken}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body
-    });
-    const text = await response.text();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response;
+    let text;
+    try {
+      response = await fetch(`https://slack.com/api/${method}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body,
+        signal: controller.signal
+      });
+      text = await response.text();
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`${label} ${method} timed out after ${this.timeoutMs}ms`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     let parsed;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new Error(`Slack API ${method} returned non-JSON response: ${text.slice(0, 200)}`);
+      throw new Error(`${label} ${method} returned non-JSON response: ${text.slice(0, 200)}`);
     }
     if (!parsed.ok) {
-      throw new Error(`Slack API ${method} failed: ${parsed.error || text}`);
+      throw new Error(`${label} ${method} failed: ${parsed.error || text}`);
     }
-    return parsed;
-  }
-
-  async appApi(method, payload = {}) {
-    const body = new URLSearchParams();
-    for (const [key, value] of Object.entries(payload)) {
-      if (value != null) body.set(key, String(value));
-    }
-    const response = await fetch(`https://slack.com/api/${method}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.appToken}`,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body
-    });
-    const parsed = await response.json();
-    if (!parsed.ok) throw new Error(`Slack app API ${method} failed: ${parsed.error}`);
     return parsed;
   }
 
