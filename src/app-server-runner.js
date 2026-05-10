@@ -39,6 +39,10 @@ export class CodexAppServerRunner {
     return session.recentTranscript.slice(-12).join("\n\n") || "(no app-server transcript yet)";
   }
 
+  hasPendingApproval(target) {
+    return this.getSession(target).pendingApprovals.length > 0;
+  }
+
   async send(text, target) {
     const session = this.getSession(target);
     return this.withSessionQueue(session, async () => {

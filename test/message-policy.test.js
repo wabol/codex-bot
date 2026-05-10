@@ -108,6 +108,11 @@ test("channel prefix can be disabled independently from mention handling", () =>
 
 test("commandName maps supported bare commands", () => {
   assert.equal(commandName("approve"), "/approve");
+  assert.equal(commandName("approve all"), "/approve");
   assert.equal(commandName("/deny"), "/deny");
+  assert.equal(commandName("deny all"), "/deny");
+  assert.equal(commandName("`approve`"), "/approve");
+  assert.equal(commandName("`/deny`"), "/deny");
+  assert.equal(commandName("approve this wording"), "");
   assert.equal(commandName("hello"), "");
 });

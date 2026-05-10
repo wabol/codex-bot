@@ -93,11 +93,15 @@ async function handleCommand(event, text) {
     return true;
   }
   if (cmd === "/approve") {
-    await runner.approve(eventTarget(event));
+    const target = eventTarget(event);
+    if (!runner.hasPendingApproval(target) && !isExplicitSlashCommand(text)) return false;
+    await runner.approve(target);
     return true;
   }
   if (cmd === "/deny") {
-    await runner.deny(eventTarget(event));
+    const target = eventTarget(event);
+    if (!runner.hasPendingApproval(target) && !isExplicitSlashCommand(text)) return false;
+    await runner.deny(target);
     return true;
   }
   if (cmd === "/restart" || cmd === "/reset") {
@@ -109,6 +113,11 @@ async function handleCommand(event, text) {
     return true;
   }
   return false;
+}
+
+function isExplicitSlashCommand(text) {
+  const trimmed = String(text || "").trim();
+  return trimmed.startsWith("/") || (trimmed.startsWith("`/") && trimmed.endsWith("`"));
 }
 
 function eventTarget(event) {

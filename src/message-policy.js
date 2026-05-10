@@ -22,8 +22,11 @@ export function shouldHandle(event, botUserId, config) {
 
 export function commandName(text) {
   const trimmed = text.trim();
-  const first = trimmed.split(/\s+/, 1)[0].toLowerCase();
-  if (first.startsWith("/")) return first;
+  const command = stripInlineCode(trimmed).toLowerCase();
+  if (command === "approve all") return "/approve";
+  if (command === "deny all") return "/deny";
+  if (command.startsWith("/")) return command;
+  if (/\s/.test(command)) return "";
   if ([
     "help",
     "status",
@@ -37,6 +40,14 @@ export function commandName(text) {
     "screen",
     "approve",
     "deny"
-  ].includes(first)) return `/${first}`;
+  ].includes(command)) return `/${command}`;
   return "";
+}
+
+function stripInlineCode(value) {
+  const text = String(value || "");
+  if (text.length >= 2 && text.startsWith("`") && text.endsWith("`")) {
+    return text.slice(1, -1);
+  }
+  return text;
 }

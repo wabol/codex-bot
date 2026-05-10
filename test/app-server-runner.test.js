@@ -162,6 +162,24 @@ test("multiple approval requests are stored and approved together", async () => 
   assert.equal(outputs.at(-1).text, "Approved 2 requests.");
 });
 
+test("hasPendingApproval reflects pending approval state", async () => {
+  const runner = new CodexAppServerRunner(config(), async () => {});
+  const session = runner.getSession(target("a"));
+  session.threadId = "thread-a";
+  runner.threadToSession.set("thread-a", "a");
+
+  assert.equal(runner.hasPendingApproval(target("a")), false);
+
+  runner.handleMessage({
+    id: 21,
+    method: "item/commandExecution/requestApproval",
+    params: { threadId: "thread-a", turnId: "turn-a", command: "date" }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(runner.hasPendingApproval(target("a")), true);
+});
+
 test("send failure reports failed lifecycle", async () => {
   const lifecycle = [];
   const runner = new CodexAppServerRunner(liveConfig(), async () => {}, async (outTarget, state) => {
